@@ -1,26 +1,38 @@
 """
 Database operations for ConnectProBot
-Uses asyncpg for async PostgreSQL operations
+Uses asyncpg for async PostgreSQL operations (Railway Compatible)
 """
 
 import asyncpg
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 import logging
+import ssl
 
 from config import DATABASE_URL, MESSAGE_RETENTION_DAYS
 
 logger = logging.getLogger(__name__)
 
-# Connection pool
 pool: Optional[asyncpg.Pool] = None
 
 
 async def init_db() -> None:
     """Initialize database connection pool and create tables."""
     global pool
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
-    
+
+    # >>> IMPORTANT for Railway PostgreSQL <<< #
+    # If the URL does NOT contain sslmode, add it.
+    if "sslmode" not in DATABASE_URL:
+        db_url = DATABASE_URL + "?sslmode=require"
+    else:
+        db_url = DATABASE_URL
+
+    pool = await asyncpg.create_pool(
+        db_url,
+        min_size=1,
+        max_size=5
+    )
+
     async with pool.acquire() as conn:
         # Create users table
         await conn.execute('''
@@ -33,8 +45,70 @@ async def init_db() -> None:
                 last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
+
         # Create owners table
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS owners (
+                id SERIAL PRIMARY KEY,
+                telegram_id BIGINT UNIQUE NOT NULL,
+                username VARCHAR(255),
+                business_name VARCHAR(255),
+                category VARCHAR(100),
+                bio TEXT,
+                logo_file_id VARCHAR(255),
+                bot_type VARCHAR(50) DEFAULT 'this_bot',
+                bot_token VARCHAR(255),
+                mini_bot_username VARCHAR(255),
+                trial_start TIMESTAMP,
+                trial_expired BOOLEAN DEFAULT FALSE,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                onboarding_step VARCHAR(50) DEFAULT 'name'
+            )
+        ''')
+
+        # Create conversations
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS conversations (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                owner_id BIGINT NOT NULL,
+                bot_token VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_message TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                message_count_today INT DEFAULT 0,
+                last_message_date DATE DEFAULT CURRENT_DATE,
+                UNIQUE(user_id, owner_id)
+            )
+        ''')
+
+        # Create messages table
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS messages (
+                id SERIAL PRIMARY KEY,
+                conversation_id INT REFERENCES conversations(id) ON DELETE CASCADE,
+                sender_type VARCHAR(10) NOT NULL,
+                message_text TEXT,
+                message_type VARCHAR(20) DEFAULT 'text',
+                telegram_message_id BIGINT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Indexes
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id)')
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_owners_telegram_id ON owners(telegram_id)')
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at)')
+
+    logger.info("🚀 Database Connected & Tables Ready (Railway Mode)")
+
+
+############################
+# BELOW FUNCTIONS REMAINED SAME
+############################
+
+# ---- KEEP EVERYTHING ELSE SAME AS YOUR FILE ----
+# No need to modify (get_user, create_user, get_owner,... etc)        # Create owners table
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS owners (
                 id SERIAL PRIMARY KEY,
