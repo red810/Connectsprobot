@@ -101,3 +101,52 @@ async def cleanup_old_messages() -> None:
         """, MESSAGE_RETENTION_DAYS)
 
     logger.info("🧹 Old messages deleted")
+    # ---------------- USER FUNCTIONS ---------------- #
+
+async def create_user(telegram_id, username, first_name):
+    if not pool:
+        return
+
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO users (telegram_id, username, first_name)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (telegram_id) DO UPDATE
+            SET username = EXCLUDED.username,
+                first_name = EXCLUDED.first_name,
+                last_active = CURRENT_TIMESTAMP;
+        """, telegram_id, username, first_name)
+
+
+async def get_user(telegram_id):
+    if not pool:
+        return None
+
+    async with pool.acquire() as conn:
+        return await conn.fetchrow("""
+            SELECT * FROM users WHERE telegram_id = $1
+        """, telegram_id)
+
+
+# ---------------- OWNER FUNCTIONS ---------------- #
+
+async def create_owner(telegram_id, username):
+    if not pool:
+        return
+
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO owners (telegram_id, username)
+            VALUES ($1, $2)
+            ON CONFLICT (telegram_id) DO NOTHING;
+        """, telegram_id, username)
+
+
+async def get_owner(telegram_id):
+    if not pool:
+        return None
+
+    async with pool.acquire() as conn:
+        return await conn.fetchrow("""
+            SELECT * FROM owners WHERE telegram_id = $1
+        """, telegram_id)
